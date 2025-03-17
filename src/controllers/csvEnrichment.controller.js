@@ -16,7 +16,9 @@ class CsvEnrichmentController {
 			const enrichedCsv = await csvEnrich.enrichCsv(email, file);
 
 			res.status(200).json({
-				...enrichedCsv
+				status: 'success',
+				message: 'CSV enriched successfully',
+				enrichedCsv
 			});
 		} catch (err) {
 			res.status(500).json({
