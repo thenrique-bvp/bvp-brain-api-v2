@@ -4,7 +4,7 @@ class CsvEnrichmentController {
 	async enrichCsv(req, res) {
 		try {
 			const email = req.query.email;
-			const file = req.files.file;
+			const file = req.file;
 
 			if (!email || !file) {
 				return res.status(400).json({
@@ -16,9 +16,7 @@ class CsvEnrichmentController {
 			const enrichedCsv = await csvEnrich.enrichCsv(email, file);
 
 			res.status(200).json({
-				status: 'success',
-				message: 'CSV enriched successfully',
-				enrichedCsv
+				...enrichedCsv
 			});
 		} catch (err) {
 			res.status(500).json({

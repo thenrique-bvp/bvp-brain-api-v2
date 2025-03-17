@@ -5,6 +5,7 @@ const { stringify } = require('csv-stringify/sync');
 const { URL } = require('url');
 const crypto = require('crypto');
 const base64 = require('base-64');
+const { sendEmail } = require('./email.service');
 
 // Configuration
 const endpoint = 'https://brain.bessemer.io/api/v1/website';
@@ -90,7 +91,7 @@ class CsvEnrichService {
 	 * Query Solr by domain
 	 */
 	async querySolrByDomain(domain) {
-		console.log('Re-check SOLR');
+		console.log('Re-check SOLR', domain);
 		const solrUrl = 'http://52.15.85.181:8983/solr/companies_specter_ID/select';
 
 		// Define query parameters
@@ -181,7 +182,7 @@ class CsvEnrichService {
 	async processCSV(userEmail, file) {
 		try {
 			// Parse CSV from buffer
-			const csvData = file.toString('utf-8');
+			const csvData = file.buffer.toString('utf-8');
 			const records = [];
 
 			// Parse CSV data
@@ -462,7 +463,7 @@ class CsvEnrichService {
 
 			// Send email if user email is provided
 			if (userEmail) {
-				await this.sendEmail(userEmail, csvOutput);
+				await sendEmail('thenrique@bvp.com', csvOutput);
 			}
 
 			return csvOutput;

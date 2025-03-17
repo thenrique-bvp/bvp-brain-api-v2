@@ -15,7 +15,11 @@
 			"type": "node",
 			"request": "launch",
 			"name": "Launch Program (Local)",
-			"program": "${workspaceFolder}/src/server.js",
+			"program": "${workspaceFolder}/server.js",
+			"runtimeExecutable": "nodemon",
+			"restart": true,
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen",
 			"skipFiles": ["<node_internals>/**"]
 		}
 	]
