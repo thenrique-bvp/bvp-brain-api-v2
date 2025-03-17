@@ -1,4 +1,4 @@
-exports.getAllItems = (req, res) => {
+exports.test = (req, res) => {
 	try {
 		res.status(200).json({
 			status: 'success',
