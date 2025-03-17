@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+    api:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: bvp-brain-api
+        ports:
+            - '3000:3000'
+            - '9229:9229'
+        command: >
+            sh -c "npm install && npx nodemon --legacy-watch --watch . src/server.js"
+        volumes:
+            - .:/app
+            - /app/node_modules
+        environment:
+            - NODE_ENV=development
+        env_file:
+            - .env
+        restart: unless-stopped
+        networks:
+            - app-network
+        develop:
+            watch:
+                - path: ./package.json
+                  action: rebuild
+                - path: ./
+                  target: /usr/src/app
+                  action: sync
+
+networks:
+    app-network:
+        driver: bridge

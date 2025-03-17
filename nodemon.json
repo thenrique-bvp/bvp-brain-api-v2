@@ -1,0 +1,8 @@
+{
+	"watch": ["src"],
+	"ext": "js,json,yaml,env",
+	"ignore": ["node_modules", ".git", ".qodo", ".bolt", ".vscode"],
+	"exec": "node --inspect=0.0.0.0:9229 server.js",
+	"legacyWatch": true,
+	"signal": "SIGINT"
+}
