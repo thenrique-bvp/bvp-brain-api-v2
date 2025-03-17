@@ -4,18 +4,13 @@ const { Readable } = require('stream');
 const { stringify } = require('csv-stringify/sync');
 const { URL } = require('url');
 const crypto = require('crypto');
-const base64 = require('base-64');
 const { sendEmail } = require('./email.service');
 
-// Configuration
 const endpoint = 'https://brain.bessemer.io/api/v1/website';
 const headers = { 'Content-Type': 'application/json' };
 const AFFINITY_API_KEY = '5Vn1lVdoBUBqVA8D73ScuqTqqwntGRFs3bDcRZ5mJiY';
 
 class CsvEnrichService {
-	/**
-	 * Search organizations in Affinity
-	 */
 	async searchOrganizations(
 		term = null,
 		withInteractionDates = false,
@@ -25,7 +20,7 @@ class CsvEnrichService {
 		pageSize = 500
 	) {
 		const baseUrl = 'https://api.affinity.co/organizations';
-		const auth = { username: '', password: AFFINITY_API_KEY }; // API key as password, no username
+		const auth = { username: '', password: AFFINITY_API_KEY };
 
 		let params = {
 			term,
@@ -69,15 +64,11 @@ class CsvEnrichService {
 	 * Extract field from Solr response
 	 */
 	extractField(responseJson, field) {
-		// Extract the 'docs' list from the response
 		const docs = responseJson?.response?.docs || [];
 
-		// Check if 'docs' list is not empty
 		if (docs.length > 0) {
-			// Extract the field from the first document
 			const fieldValue = docs[0][field] || [];
 
-			// Return the first value if the list is not empty
 			if (fieldValue.length > 0) {
 				return fieldValue[0];
 			}
@@ -110,41 +101,24 @@ class CsvEnrichService {
 		});
 	}
 
-	/**
-	 * Check if string contains URL
-	 */
 	containsUrl(query) {
-		// Convert the query to lowercase for case-insensitive matching
 		const queryLower = query.toLowerCase();
 
-		// Check for presence of substrings
 		return queryLower.includes('http') || queryLower.includes('www') || queryLower.includes('.com');
 	}
 
-	/**
-	 * Extract LinkedIn URL from text
-	 */
 	extractLinkedinUrl(text) {
-		// Regular expression pattern to match LinkedIn URLs
 		const pattern = /https:\/\/linkedin\.com\/in\/[a-zA-Z0-9-]+/;
 
-		// Using match to extract all URLs matching the pattern
 		const matches = text.match(pattern);
 
-		// Return the first URL found, or null if no URLs were found
 		return matches ? matches[0] : null;
 	}
 
-	/**
-	 * Generate random ID
-	 */
 	generateRandomId() {
 		return crypto.randomBytes(5).toString('hex').toUpperCase();
 	}
 
-	/**
-	 * Call batch endpoint
-	 */
 	async callBatchEndpoint(companiesData) {
 		const url = 'https://brain.bessemer.io/api/v1/core/batch';
 		const headers = { 'Content-Type': 'application/json' };
@@ -180,17 +154,10 @@ class CsvEnrichService {
 		return null;
 	}
 
-	/**
-	 * Função auxiliar para sincronização entre threads
-	 */
 	synchronized(fn) {
-		// Execute a função de forma atômica
 		fn();
 	}
 
-	/**
-	 * Implementa um mecanismo de retry com backoff exponencial
-	 */
 	async retryWithBackoff(fn, maxRetries = 3, initialDelay = 300) {
 		let retries = 0;
 		while (true) {
@@ -209,18 +176,13 @@ class CsvEnrichService {
 		}
 	}
 
-	/**
-	 * Versão otimizada do método processCSV para melhor performance
-	 */
 	async processCSV(userEmail, file) {
 		try {
 			console.time('csv-processing');
 
-			// Parse CSV from buffer mais eficiente
 			const csvData = file.buffer.toString('utf-8');
 			const records = [];
 
-			// Parse CSV data com buffer de tamanho otimizado
 			await new Promise((resolve, reject) => {
 				const stream = Readable.from(csvData, { highWaterMark: 64 * 1024 }); // 64KB chunks
 				stream
@@ -238,48 +200,41 @@ class CsvEnrichService {
 
 			console.timeLog('csv-processing', 'CSV parsing completed');
 
-			// Extract company URLs - faça isso em uma única passagem
 			const companyUrls = records.map((row) => row.company_url);
 			const parsedUrls = companyUrls.map(this.cleanAndParseUrl);
 
 			console.timeLog('csv-processing', 'URL parsing completed');
 
-			// Inicializar caches
 			const solrCache = new Map();
 			const affinityCache = new Map();
 
-			// Aumentar tamanho do batch para melhorar throughput
-			const batchSize = 80;
+			const batchSize = 80; //Podemos aumentar para quanto quisermos
 			const listOfReturns = [];
 
-			// Dividir trabalho em batches
+			// Dividindo em batches para não sobrecarregar a API
 			const batches = [];
 			for (let i = 0; i < parsedUrls.length; i += batchSize) {
 				batches.push(parsedUrls.slice(i, i + batchSize));
 			}
 
-			// Limite de concorrência para não sobrecarregar APIs externas
 			const concurrencyLimit = 3;
 			let activeBatches = 0;
 
-			// Processar batches em grupos controlados
 			for (let i = 0; i < batches.length; i += concurrencyLimit) {
 				const currentBatches = batches.slice(i, i + concurrencyLimit);
 
-				// Processar lote atual em paralelo
+				// Processar em paralelo
 				await Promise.all(
 					currentBatches.map(async (batchUrls) => {
 						activeBatches++;
 						console.log(`Processing batch ${activeBatches}/${batches.length}`);
 
-						// Preparar payload para endpoint core
 						const payload = JSON.stringify({ websites: batchUrls });
 
-						// Adicionar timeout e retry para evitar travamentos
 						const response = await this.retryWithBackoff(async () => {
 							return await axios.post(endpoint, payload, {
 								headers,
-								timeout: 15000 // 15s timeout
+								timeout: 15000
 							});
 						});
 
@@ -290,7 +245,7 @@ class CsvEnrichService {
 						const affinityMetadata = response.data;
 						const payloadForCore = { companies: [] };
 
-						// Preparar dados para API core - otimizado para um único loop
+						// Preparar dados para API co
 						batchUrls.forEach((url) => {
 							const companyName = affinityMetadata[url]?.[0]?.Name?.[0] || url;
 							payloadForCore.companies.push({
@@ -299,7 +254,6 @@ class CsvEnrichService {
 							});
 						});
 
-						// Chamar endpoint batch com retry
 						const allData = await this.callBatchEndpoint(payloadForCore);
 
 						// Processar URLs em paralelo, mas com limitação para não sobrecarregar APIs
@@ -319,7 +273,7 @@ class CsvEnrichService {
 											affinityCache
 										);
 
-										// Thread-safe push para o array final
+										// Evitar que o array seja alterado enquanto estamos iterando sobre ele
 										this.synchronized(() => {
 											listOfReturns.push(companyData);
 										});
@@ -349,16 +303,14 @@ class CsvEnrichService {
 
 			console.timeLog('csv-processing', 'Data enrichment completed');
 
-			// Converter resultados para CSV com opções otimizadas
 			const csvOutput = stringify(listOfReturns, {
 				header: true,
 				quoted: true,
 				quoted_empty: true
 			});
 
-			// Enviar email se email do usuário for fornecido
 			if (userEmail) {
-				await sendEmail('thenrique@bvp.com', csvOutput);
+				await sendEmail(userEmail, csvOutput);
 			}
 
 			console.timeEnd('csv-processing');
@@ -369,9 +321,6 @@ class CsvEnrichService {
 		}
 	}
 
-	/**
-	 * Processa dados de uma empresa individual - auxiliar para paralelismo
-	 */
 	async processCompanyData(url, companyUrls, affinityMetadata, allData, solrCache, affinityCache) {
 		let sfAccount = 'N/A';
 		const companyName = affinityMetadata[url]?.[0]?.Name?.[0] || url;
@@ -540,7 +489,6 @@ class CsvEnrichService {
 			console.error(`Error searching Affinity for ${url}:`, error);
 		}
 
-		// Construir e retornar objeto único
 		return {
 			ID: `${this.generateRandomId()}-${this.generateRandomId()}`,
 			date_added: '',
@@ -565,9 +513,6 @@ class CsvEnrichService {
 		};
 	}
 
-	/**
-	 * Clean and parse URL
-	 */
 	cleanAndParseUrl(url) {
 		let parsedUrl = url.replace(/https?:\/\//, '').replace('www.', '');
 		parsedUrl = parsedUrl.replace(/[\[\]'"]/g, '');
@@ -585,14 +530,9 @@ class CsvEnrichService {
 		}
 	}
 
-	/**
-	 * Extrair múltiplos campos em uma única passagem
-	 */
 	extractMultipleFields(responseJson, fieldsMap) {
-		// Extract the 'docs' list from the response
 		const docs = responseJson?.response?.docs || [];
 
-		// Check if 'docs' list is not empty
 		if (docs.length > 0) {
 			Object.entries(fieldsMap).forEach(([fieldName, callback]) => {
 				const fieldValue = docs[0][fieldName] || [];
@@ -667,9 +607,6 @@ class CsvEnrichService {
 		dataObj.lastMeeting = metadata?.Last_Meeting?.[0] || 'N/A';
 	}
 
-	/**
-	 * Main entry point for the service
-	 */
 	async enrichCsv(userEmail, file) {
 		try {
 			return await this.processCSV(userEmail, file);
