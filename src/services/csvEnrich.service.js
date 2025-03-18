@@ -5,6 +5,8 @@ const { stringify } = require('csv-stringify/sync');
 const { URL } = require('url');
 const crypto = require('crypto');
 const { sendEmail } = require('./email.service');
+const { retryWithBackoff, synchronized } = require('../utils');
+const { querySolrByDomain } = require('./solr.service');
 
 const endpoint = 'https://brain.bessemer.io/api/v1/website';
 const headers = { 'Content-Type': 'application/json' };
@@ -78,29 +80,6 @@ class CsvEnrichService {
 		return 'N/A';
 	}
 
-	/**
-	 * Query Solr by domain
-	 */
-	async querySolrByDomain(domain) {
-		console.log('Re-check SOLR', domain);
-		const solrUrl = 'http://52.15.85.181:8983/solr/companies_specter_ID/select';
-
-		// Define query parameters
-		const queryParams = {
-			'q.op': 'OR',
-			q: `Website:"${domain}"`,
-			sort: '_version_ DESC'
-		};
-
-		return this.retryWithBackoff(async () => {
-			const response = await axios.get(solrUrl, {
-				params: queryParams,
-				timeout: 5000 // Add timeout to prevent hanging requests
-			});
-			return response.data;
-		});
-	}
-
 	containsUrl(query) {
 		const queryLower = query.toLowerCase();
 
@@ -123,7 +102,7 @@ class CsvEnrichService {
 		const url = 'https://brain.bessemer.io/api/v1/core/batch';
 		const headers = { 'Content-Type': 'application/json' };
 
-		return this.retryWithBackoff(
+		return retryWithBackoff(
 			async () => {
 				const response = await axios.post(url, companiesData, {
 					headers,
@@ -152,28 +131,6 @@ class CsvEnrichService {
 		}
 		console.log(`URL not found in the list: ${url}`);
 		return null;
-	}
-
-	synchronized(fn) {
-		fn();
-	}
-
-	async retryWithBackoff(fn, maxRetries = 3, initialDelay = 300) {
-		let retries = 0;
-		while (true) {
-			try {
-				return await fn();
-			} catch (error) {
-				if (retries >= maxRetries) {
-					throw error;
-				}
-
-				const delay = initialDelay * Math.pow(2, retries);
-				console.log(`Retrying after ${delay}ms...`);
-				await new Promise((resolve) => setTimeout(resolve, delay));
-				retries++;
-			}
-		}
 	}
 
 	async processCSV(userEmail, file) {
@@ -231,7 +188,7 @@ class CsvEnrichService {
 
 						const payload = JSON.stringify({ websites: batchUrls });
 
-						const response = await this.retryWithBackoff(async () => {
+						const response = await retryWithBackoff(async () => {
 							return await axios.post(endpoint, payload, {
 								headers,
 								timeout: 15000
@@ -274,21 +231,19 @@ class CsvEnrichService {
 										);
 
 										// Evitar que o array seja alterado enquanto estamos iterando sobre ele
-										this.synchronized(() => {
+										synchronized(() => {
 											listOfReturns.push(companyData);
 										});
 									} catch (error) {
 										console.error(`Error processing ${url}:`, error);
-										// Adicionar entrada com erro para não quebrar o processo
 										listOfReturns.push({
 											ID: `${this.generateRandomId()}-${this.generateRandomId()}`,
 											'Company Name': url,
 											'Company Website': url,
 											Error: error.message,
-											// Adicionar campos default
 											'Last Email Date': 'Error',
-											'Last Meeting Date': 'Error'
-											// ...outros campos com valores default
+											'Last Meeting Date': 'Error',
+											'Year Founded': 'Error'
 										});
 									}
 								})
@@ -370,6 +325,7 @@ class CsvEnrichService {
 		let affinityId = 'N/A';
 		let lastMeeting = 'N/A';
 		let lastEmail = 'N/A';
+		let yearFounded = 'N/A';
 
 		// Process Specter data if available
 		if (specterData.length > 0) {
@@ -410,7 +366,8 @@ class CsvEnrichService {
 				affinityId,
 				description,
 				lastEmail,
-				lastMeeting
+				lastMeeting,
+				dateFunded
 			});
 		}
 
@@ -422,7 +379,7 @@ class CsvEnrichService {
 			if (solrCache.has(url)) {
 				specterFound = solrCache.get(url);
 			} else {
-				specterFound = await this.querySolrByDomain(url);
+				specterFound = await querySolrByDomain(url);
 				// Store in cache
 				solrCache.set(url, specterFound);
 			}
@@ -600,6 +557,10 @@ class CsvEnrichService {
 
 		if (dataObj.description === 'N/A' && 'Description' in metadata) {
 			dataObj.description = metadata['Description'][0];
+		}
+
+		if (dataObj.dateFunded === 'N/A' && 'Year_Founded' in metadata) {
+			dataObj.dateFunded = metadata['Year_Founded'][0];
 		}
 
 		// Get last email and meeting data

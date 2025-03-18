@@ -21,8 +21,31 @@ function generateRandomId() {
 	return crypto.randomBytes(5).toString('hex').toUpperCase();
 }
 
+async function retryWithBackoff(fn, maxRetries = 3, initialDelay = 300) {
+	let retries = 0;
+	while (true) {
+		try {
+			return await fn();
+		} catch (error) {
+			if (retries >= maxRetries) {
+				throw error;
+			}
+
+			const delay = initialDelay * Math.pow(2, retries);
+			console.log(`Retrying after ${delay}ms...`);
+			await new Promise((resolve) => setTimeout(resolve, delay));
+			retries++;
+		}
+	}
+}
+
+function synchronized(fn) {
+	fn();
+}
 module.exports = {
 	containsUrl,
 	extractLinkedinUrl,
-	generateRandomId
+	generateRandomId,
+	retryWithBackoff,
+	synchronized
 };
