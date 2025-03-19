@@ -17,13 +17,28 @@ services:
         build:
             context: .
             dockerfile: Dockerfile
+            args:
+                NODE_ENV: production
         container_name: bvp-brain-api
-        volumes:
-            - .:/app
-            - /app/node_modules
-        working_dir: /app
+        working_dir: /usr/src/app
         env_file:
             - .env
+        environment:
+            - NODE_ENV=production
         ports:
             - '3000:3000'
         restart: always
+        deploy:
+            resources:
+                limits:
+                    cpus: '1'
+                    memory: 1G
+                reservations:
+                    cpus: '0.5'
+                    memory: 512M
+        healthcheck:
+            test: ['CMD', 'wget', '--spider', 'http://localhost:3000/health']
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 40s
