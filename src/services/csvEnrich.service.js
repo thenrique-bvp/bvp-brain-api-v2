@@ -10,7 +10,7 @@ const { querySolrByDomain } = require('./solr.service');
 
 const endpoint = 'https://brain.bessemer.io/api/v1/website';
 const headers = { 'Content-Type': 'application/json' };
-const AFFINITY_API_KEY = process.env.AFFINITY_API_KEY;
+const AFFINITY_API_KEY = '5Vn1lVdoBUBqVA8D73ScuqTqqwntGRFs3bDcRZ5mJiY';
 
 class CsvEnrichService {
 	async searchOrganizations(
@@ -309,70 +309,49 @@ class CsvEnrichService {
 		const findSpecterData = (allData, companyName) =>
 			(allData.specter || []).filter((specter) => specter.Company_Name?.[0] === companyName);
 
-		specterData = findSpecterData(allData, companyName);
+		specterData = await findSpecterData(allData, companyName);
 
-		// Default values
-		let dateFunded = 'N/A';
-		let companyLinkedin = 'N/A';
-		let headcount = 'N/A';
-		let description = 'N/A';
-		let location = 'N/A';
-		let founder = 'N/A';
-		let totalFunding = 'N/A';
-		let lastFunding = 'N/A';
-		let fundingDate = 'N/A';
-		let employeeGrowth = 'N/A';
-		let affinityId = 'N/A';
-		let lastMeeting = 'N/A';
-		let lastEmail = 'N/A';
-		let yearFounded = 'N/A';
+		// Criar objeto com valores padrão
+		let companyInfo = {
+			dateFunded: 'N/A',
+			companyLinkedin: 'N/A',
+			headcount: 'N/A',
+			description: 'N/A',
+			location: 'N/A',
+			founder: 'N/A',
+			totalFunding: 'N/A',
+			lastFunding: 'N/A',
+			fundingDate: 'N/A',
+			employeeGrowth: 'N/A',
+			affinityId: 'N/A',
+			lastMeeting: 'N/A',
+			lastEmail: 'N/A'
+		};
 
 		// Process Specter data if available
 		if (specterData.length > 0) {
-			dateFunded = specterData[0].Founded_Date?.[0] || 'N/A';
-			companyLinkedin = specterData[0]['LinkedIn_-_URL']?.[0] || 'N/A';
-			headcount = specterData[0].Employee_Count?.[0] || 'N/A';
-			description = specterData[0].Description?.[0] || 'N/A';
-			location = specterData[0].HQ_Region?.[0] || 'N/A';
-			founder = specterData[0].Founders?.[0] || 'N/A';
-			employeeGrowth = specterData[0]['Employees_-_6_Months_Growth']?.[0]?.toString() || '0';
-
-			if ('Total_Funding_Amount__in_USD_' in specterData[0]) {
-				totalFunding = specterData[0]['Total_Funding_Amount__in_USD_'][0];
-			}
-
-			if ('Last_Funding_Amount__in_USD_' in specterData[0]) {
-				lastFunding = specterData[0]['Last_Funding_Amount__in_USD_'][0];
-			}
-
-			if ('Last_Funding_Date' in specterData[0]) {
-				fundingDate = specterData[0]['Last_Funding_Date'][0];
-			}
+			Object.assign(companyInfo, {
+				dateFunded: specterData[0].Founded_Date?.[0] || 'N/A',
+				companyLinkedin: specterData[0]['LinkedIn_-_URL']?.[0] || 'N/A',
+				headcount: specterData[0].Employee_Count?.[0] || 'N/A',
+				description: specterData[0].Description?.[0] || 'N/A',
+				location: specterData[0].HQ_Region?.[0] || 'N/A',
+				founder: specterData[0].Founders?.[0] || 'N/A',
+				employeeGrowth: specterData[0]['Employees_-_6_Months_Growth']?.[0]?.toString() || '0',
+				totalFunding: specterData[0]['Total_Funding_Amount__in_USD_']?.[0] || 'N/A',
+				lastFunding: specterData[0]['Last_Funding_Amount__in_USD_']?.[0] || 'N/A',
+				fundingDate: specterData[0]['Last_Funding_Date']?.[0] || 'N/A'
+			});
 		}
 
 		// Process Affinity metadata
 		if (affinityMetadata[url]?.length > 0) {
 			const metadata = affinityMetadata[url][0];
-			// Extract all Affinity data in one pass
-			this.extractAffinityData(metadata, {
-				founder,
-				totalFunding,
-				lastFunding,
-				fundingDate,
-				headcount,
-				location,
-				employeeGrowth,
-				companyLinkedin,
-				affinityId,
-				description,
-				lastEmail,
-				lastMeeting,
-				dateFunded
-			});
+			companyInfo = await this.extractAffinityData(metadata, companyInfo);
 		}
 
 		// Se last email is not available, try to get it from Solr - usando cache
-		if (lastEmail === 'N/A' || lastEmail === '' || lastEmail === null) {
+		if (companyInfo.lastEmail === 'N/A' || companyInfo.lastEmail === '' || companyInfo.lastEmail === null) {
 			let specterFound;
 
 			// Check cache first
@@ -387,34 +366,34 @@ class CsvEnrichService {
 			// Processar todos os campos em um único ciclo
 			const fields = {
 				Last_Email: (value) => {
-					lastEmail = value;
+					companyInfo.lastEmail = value;
 				},
 				Year_Founded: (value) => {
-					dateFunded = value;
+					companyInfo.dateFunded = value;
 				},
 				Number_of_Employees: (value) => {
-					headcount = value;
+					companyInfo.headcount = value;
 				},
 				Employees__Growth_YoY____: (value) => {
-					employeeGrowth = value;
+					companyInfo.employeeGrowth = value;
 				},
 				LinkedIn_Profile__Founders_CEOs_: (value) => {
-					founder = value;
+					companyInfo.founder = value;
 				},
 				LinkedIn_URL: (value) => {
-					companyLinkedin = value;
+					companyInfo.companyLinkedin = value;
 				},
 				Total_Funding_Amount__USD_: (value) => {
-					totalFunding = value;
+					companyInfo.totalFunding = value;
 				},
 				Last_Funding_Date: (value) => {
-					fundingDate = value;
+					companyInfo.fundingDate = value;
 				},
 				Last_Funding_Amount__USD_: (value) => {
-					lastFunding = value;
+					companyInfo.lastFunding = value;
 				},
 				Location__Country_: (value) => {
-					location = value;
+					companyInfo.location = value;
 				}
 			};
 
@@ -424,6 +403,7 @@ class CsvEnrichService {
 		// Search in Affinity API - com cache
 		let affinity;
 		try {
+			// Check affinity cache first
 			if (affinityCache.has(url)) {
 				affinity = affinityCache.get(url);
 			} else {
@@ -434,13 +414,14 @@ class CsvEnrichService {
 					'2001-01-01T00:00:00',
 					'2034-01-12T23:59:59'
 				);
+				// Store in cache
 				affinityCache.set(url, affinity);
 			}
 
 			if (affinity && affinity.length > 0) {
-				lastEmail = affinity[0].interaction_dates.last_email_date;
-				lastMeeting = affinity[0].interaction_dates.last_event_date;
-				affinityId = affinity[0].id;
+				companyInfo.lastEmail = affinity[0].interaction_dates.last_email_date;
+				companyInfo.lastMeeting = affinity[0].interaction_dates.last_event_date;
+				companyInfo.affinityId = affinity[0].id;
 			}
 		} catch (error) {
 			console.error(`Error searching Affinity for ${url}:`, error);
@@ -451,22 +432,24 @@ class CsvEnrichService {
 			date_added: '',
 			'Company Name': companyName,
 			'Company Website': url,
-			'Last Email Date': lastEmail,
-			'Last Meeting Date': lastMeeting,
+			'Last Email Date': companyInfo.lastEmail,
+			'Last Meeting Date': companyInfo.lastMeeting,
 			'Link to Salesforce Entry': sfAccount,
 			'Salesforce Return String': sfStringData,
 			'Link to Affinity Entry':
-				affinityId !== 'N/A' ? `https://bvp.affinity.co/companies/${affinityId}` : affinityId,
-			'Year Founded': dateFunded,
-			'Company Linkedin': companyLinkedin,
-			'Number of Employees': headcount,
-			Description: description,
-			Country: location,
-			"Founders, CEO's Linkedin": founder,
-			'Total Funding': totalFunding,
-			'Last Funding': lastFunding,
-			'Last Funding Date': fundingDate,
-			'Employee Growth Rate': employeeGrowth
+				companyInfo.affinityId !== 'N/A'
+					? `https://bvp.affinity.co/companies/${companyInfo.affinityId}`
+					: companyInfo.affinityId,
+			'Year Founded': companyInfo.dateFunded,
+			'Company Linkedin': companyInfo.companyLinkedin,
+			'Number of Employees': companyInfo.headcount,
+			Description: companyInfo.description,
+			Country: companyInfo.location,
+			"Founders, CEO's Linkedin": companyInfo.founder,
+			'Total Funding': companyInfo.totalFunding,
+			'Last Funding': companyInfo.lastFunding,
+			'Last Funding Date': companyInfo.fundingDate,
+			'Employee Growth Rate': companyInfo.employeeGrowth
 		};
 	}
 
@@ -504,68 +487,72 @@ class CsvEnrichService {
 	 * Extract all Affinity data in one pass
 	 */
 	extractAffinityData(metadata, dataObj) {
-		if ('LinkedIn_Profile__Founders_CEOs_' in metadata) {
-			dataObj.founder =
-				this.extractLinkedinUrl(metadata['LinkedIn_Profile__Founders_CEOs_'][0]) || dataObj.founder;
-		}
-
-		if (dataObj.totalFunding === 'N/A' && 'Total_Funding_Amount__USD_' in metadata) {
-			dataObj.totalFunding = metadata['Total_Funding_Amount__USD_'][0];
-		}
-
-		if (dataObj.lastFunding === 'N/A' && 'Last_Funding_Amount__USD_' in metadata) {
-			dataObj.lastFunding = metadata['Last_Funding_Amount__USD_'][0];
-		}
-
-		if (dataObj.fundingDate === 'N/A' && 'Last_Funding_Date' in metadata) {
-			dataObj.fundingDate = metadata['Last_Funding_Date'][0];
-		}
-
-		if ('Number_of_Employees' in metadata) {
-			dataObj.headcount = metadata['Number_of_Employees'][0];
-		}
-
-		if ('Location__Country_' in metadata) {
-			dataObj.location = metadata['Location__Country_'][0];
-		}
-
-		if ('Employees__Growth_YoY____' in metadata) {
-			dataObj.employeeGrowth = metadata['Employees__Growth_YoY____'][0].toString();
-		}
-
-		if (
-			dataObj.employeeGrowth === 'N/A' &&
-			'Number_of_Employees' in metadata &&
-			'Employees__12_Months_Ago' in metadata
-		) {
-			const currentEmployees = parseInt(metadata['Number_of_Employees'][0]);
-			const employees12MonthsAgo = parseInt(metadata['Employees__12_Months_Ago'][0]);
-
-			if (employees12MonthsAgo !== 0) {
-				const growthRate = ((currentEmployees - employees12MonthsAgo) / employees12MonthsAgo) * 100;
-				dataObj.employeeGrowth = growthRate.toFixed(2);
+		try {
+			if (dataObj.totalFunding === 'N/A' && 'Total_Funding_Amount__USD_' in metadata) {
+				dataObj.totalFunding = metadata['Total_Funding_Amount__USD_'][0];
 			}
-		}
 
-		if (dataObj.companyLinkedin === 'N/A' && 'LinkedIn_URL' in metadata) {
-			dataObj.companyLinkedin = metadata['LinkedIn_URL'][0];
-		}
+			if (dataObj.lastMeeting === 'N/A' && 'Last_Meeting' in metadata) {
+				dataObj.lastMeeting = metadata['Last_Meeting'][0];
+			}
 
-		if ('Organization_Id' in metadata) {
-			dataObj.affinityId = metadata['Organization_Id'][0];
-		}
+			if (dataObj.lastFunding === 'N/A' && 'Last_Funding_Amount__USD_' in metadata) {
+				dataObj.lastFunding = metadata['Last_Funding_Amount__USD_'][0];
+			}
 
-		if (dataObj.description === 'N/A' && 'Description' in metadata) {
-			dataObj.description = metadata['Description'][0];
-		}
+			if (dataObj.lastEmail === 'N/A' && 'Last_Email' in metadata) {
+				dataObj.lastEmail = metadata['Last_Email'][0];
+			}
 
-		if (dataObj.dateFunded === 'N/A' && 'Year_Founded' in metadata) {
-			dataObj.dateFunded = metadata['Year_Founded'][0];
-		}
+			if (dataObj.fundingDate === 'N/A' && 'Last_Funding_Date' in metadata) {
+				dataObj.fundingDate = metadata['Last_Funding_Date'][0];
+			}
 
-		// Get last email and meeting data
-		dataObj.lastEmail = metadata?.Last_Email?.[0] || 'N/A';
-		dataObj.lastMeeting = metadata?.Last_Meeting?.[0] || 'N/A';
+			if ('Number_of_Employees' in metadata) {
+				dataObj.headcount = metadata['Number_of_Employees'][0];
+			}
+
+			if ('Location__Country_' in metadata) {
+				dataObj.location = metadata['Location__Country_'][0];
+			}
+
+			if ('Employees__Growth_YoY____' in metadata) {
+				dataObj.employeeGrowth = metadata['Employees__Growth_YoY____'][0].toString();
+			}
+
+			if (
+				dataObj.employeeGrowth === 'N/A' &&
+				'Number_of_Employees' in metadata &&
+				'Employees__12_Months_Ago' in metadata
+			) {
+				const currentEmployees = parseInt(metadata['Number_of_Employees'][0]);
+				const employees12MonthsAgo = parseInt(metadata['Employees__12_Months_Ago'][0]);
+
+				if (employees12MonthsAgo !== 0) {
+					const growthRate = ((currentEmployees - employees12MonthsAgo) / employees12MonthsAgo) * 100;
+					dataObj.employeeGrowth = growthRate.toFixed(2);
+				}
+			}
+
+			if (dataObj.companyLinkedin === 'N/A' && 'LinkedIn_URL' in metadata) {
+				dataObj.companyLinkedin = metadata['LinkedIn_URL'][0];
+			}
+
+			if ('Organization_Id' in metadata) {
+				dataObj.affinityId = metadata['Organization_Id'][0];
+			}
+
+			if (dataObj.description === 'N/A' && 'Description' in metadata) {
+				dataObj.description = metadata['Description'][0];
+			}
+
+			if (dataObj.dateFunded === 'N/A' && 'Year_Founded' in metadata) {
+				dataObj.dateFunded = metadata['Year_Founded'][0];
+			}
+			return dataObj;
+		} catch (error) {
+			console.error(`Error extracting Affinity data for ${metadata}:`, error);
+		}
 	}
 
 	async enrichCsv(userEmail, file) {
