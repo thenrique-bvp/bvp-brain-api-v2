@@ -205,11 +205,12 @@ class CsvEnrichService {
 						batchUrls.forEach((url) => {
 							const companyName = affinityMetadata[url]?.[0]?.Name?.[0] || url;
 							payloadForCore.companies.push({
-								company_url: url,
-								company_name: companyName
+								company_url: url.replace(/\/$/, ''),
+								company_name: companyName.replace(/\/$/, '')
 							});
 						});
 
+						console.log('batchUrls', batchUrls);
 						const allData = await this.callBatchEndpoint(payloadForCore);
 
 						// Processar URLs em paralelo, mas com limitação para não sobrecarregar APIs
@@ -277,7 +278,8 @@ class CsvEnrichService {
 
 	async processCompanyData(url, companyUrls, affinityMetadata, allData, solrCache, affinityCache) {
 		let sfAccount = 'N/A';
-		const companyName = affinityMetadata[url]?.[0]?.Name?.[0] || url;
+		const companyName = (affinityMetadata[url]?.[0]?.Name?.[0] || url).replace(/\/$/, '');
+
 		let sfStringData = 'N/A';
 		let specterData = {};
 
@@ -430,7 +432,7 @@ class CsvEnrichService {
 			ID: `${this.generateRandomId()}-${this.generateRandomId()}`,
 			date_added: '',
 			'Company Name': companyName,
-			'Company Website': url,
+			'Company Website': url.replace(/\/$/, ''),
 			'Last Email Date': companyInfo.lastEmail,
 			'Last Meeting Date': companyInfo.lastMeeting,
 			'Link to Salesforce Entry': sfAccount,
