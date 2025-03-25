@@ -5,11 +5,11 @@ info:
   version: 1.0.0
 
 servers:
-  - url: /api/v1
+  - url: /api/v2
     description: Default API path
 
 paths:
-  /error:
+  /core/error:
     post:
       summary: Send error message
       description: Log an error message from various services
@@ -80,7 +80,7 @@ paths:
                   message:
                     type: string
 
-  /csv/enrich:
+  /core/csv:
     post:
       summary: Enrich CSV data
       description: Process and enrich a CSV file with additional data
