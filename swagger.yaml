@@ -1,0 +1,160 @@
+openapi: 3.0.0
+info:
+  title: BVP Brain API
+  description: API for BVP Brain services including error logging and CSV enrichment
+  version: 1.0.0
+
+servers:
+  - url: /api/v1
+    description: Default API path
+
+paths:
+  /error:
+    post:
+      summary: Send error message
+      description: Log an error message from various services
+      tags:
+        - Core
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - service
+                - method
+                - error
+              properties:
+                service:
+                  type: string
+                  description: The service that generated the error
+                method:
+                  type: string
+                  description: The method that generated the error
+                error:
+                  type: string
+                  description: The error message
+                details:
+                  type: object
+                  description: Additional details about the error
+      responses:
+        '200':
+          description: Error message sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  message:
+                    type: string
+                    example: Error message sent successfully
+                  data:
+                    type: object
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Missing required fields: service, method, error
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+
+  /csv/enrich:
+    post:
+      summary: Enrich CSV data
+      description: Process and enrich a CSV file with additional data
+      tags:
+        - CSV Enrichment
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+          description: Email of the user requesting enrichment
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: CSV file to be enriched
+      responses:
+        '200':
+          description: CSV enriched successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  message:
+                    type: string
+                    example: CSV enriched successfully
+                  enrichedCsv:
+                    type: object
+                    description: The enriched CSV data
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Email and file are required
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        status:
+          type: string
+          example: error
+        message:
+          type: string 
