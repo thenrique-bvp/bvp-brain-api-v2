@@ -6,9 +6,11 @@ const upload = multer({ storage: storage });
 
 const coreController = require('../controllers/core.controller');
 const csvEnrichmentController = require('../controllers/csvEnrichment.controller');
-router.get('/core/test', coreController.test);
+
+//Core
+router.post('/core/error', coreController.sendErrorMessage);
 
 //CSV Enrichment
-router.post('/v2/core/csv', upload.single('file'), csvEnrichmentController.enrichCsv);
+router.post('/core/csv', upload.single('file'), csvEnrichmentController.enrichCsv);
 
 module.exports = router;

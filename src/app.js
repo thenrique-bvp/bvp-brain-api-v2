@@ -17,7 +17,7 @@ app.use('/health', (req, res) => {
 	});
 });
 
-app.use('/api', routes);
+app.use('/api/v2', routes);
 
 app.use((err, req, res, next) => {
 	console.error(err.stack);
