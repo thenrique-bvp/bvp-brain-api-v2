@@ -23,6 +23,7 @@
 		"csv-stringify": "^6.5.2",
 		"dotenv": "^16.4.7",
 		"express": "^4.21.2",
+		"jsforce": "^3.6.6",
 		"multer": "^1.4.5-lts.1",
 		"nodemon": "^3.1.9",
 		"swagger-ui-express": "^5.0.1",

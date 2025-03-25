@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const { sendEmail } = require('./email.service');
 const { retryWithBackoff, synchronized } = require('../utils');
 const { querySolrByDomain } = require('./solr.service');
-
+const { salesforceApi } = require('./salesforce.service');
 const endpoint = 'https://brain.bessemer.io/api/v1/website';
 const headers = { 'Content-Type': 'application/json' };
 const AFFINITY_API_KEY = process.env.AFFINITY_API_KEY;
@@ -57,7 +57,8 @@ class CsvEnrichService {
 
 			return results;
 		} catch (error) {
-			throw new Error(`Failed to fetch organizations: ${error.message}`);
+			console.error(`Failed to fetch organizations for ${term}: ${error.message}`);
+			throw error;
 		}
 	}
 
@@ -100,6 +101,7 @@ class CsvEnrichService {
 	async callBatchEndpoint(companiesData) {
 		const url = 'https://brain.bessemer.io/api/v1/core/batch';
 		const headers = { 'Content-Type': 'application/json' };
+		console.log('companiesData', companiesData);
 
 		return retryWithBackoff(
 			async () => {
@@ -161,9 +163,6 @@ class CsvEnrichService {
 
 			console.timeLog('csv-processing', 'URL parsing completed');
 
-			const solrCache = new Map();
-			const affinityCache = new Map();
-
 			const batchSize = 80; //Podemos aumentar para quanto quisermos
 			const listOfReturns = [];
 
@@ -201,19 +200,22 @@ class CsvEnrichService {
 						const affinityMetadata = response.data;
 						const payloadForCore = { companies: [] };
 
-						// Preparar dados para API co
-						batchUrls.forEach((url) => {
-							const companyName = affinityMetadata[url]?.[0]?.Name?.[0] || url;
-							payloadForCore.companies.push({
-								company_url: url.replace(/\/$/, ''),
-								company_name: companyName.replace(/\/$/, '')
-							});
-						});
+						// Preparar dados para API core após processar batchUrls
+						const processedUrls = await Promise.all(
+							batchUrls.map(async (url) => {
+								return {
+									company_url: url.replace(/\/$/, ''),
+									company_name: (affinityMetadata[url]?.[0]?.Name?.[0] || url).replace(/\/$/, '')
+								};
+							})
+						);
 
-						console.log('batchUrls', batchUrls);
+						payloadForCore.companies = processedUrls;
+
+						// Primeiro obtemos os dados do batch endpoint
 						const allData = await this.callBatchEndpoint(payloadForCore);
 
-						// Processar URLs em paralelo, mas com limitação para não sobrecarregar APIs
+						// Só depois processamos os URLs com os dados obtidos
 						const chunkSize = 20; // Processar 20 por vez
 						for (let j = 0; j < batchUrls.length; j += chunkSize) {
 							const chunk = batchUrls.slice(j, j + chunkSize);
@@ -222,15 +224,16 @@ class CsvEnrichService {
 								chunk.map(async (url) => {
 									try {
 										const companyData = await this.processCompanyData(
-											url,
-											companyUrls,
+											url.replace(/\/$/, ''),
 											affinityMetadata,
-											allData,
-											solrCache,
-											affinityCache
+											allData
 										);
 
-										// Evitar que o array seja alterado enquanto estamos iterando sobre ele
+										console.log(`Adding to CSV for ${url}:`, {
+											lastEmail: companyData['Last Email Date'],
+											lastMeeting: companyData['Last Meeting Date']
+										});
+
 										synchronized(() => {
 											listOfReturns.push(companyData);
 										});
@@ -276,186 +279,242 @@ class CsvEnrichService {
 		}
 	}
 
-	async processCompanyData(url, companyUrls, affinityMetadata, allData, solrCache, affinityCache) {
-		let sfAccount = 'N/A';
-		const companyName = (affinityMetadata[url]?.[0]?.Name?.[0] || url).replace(/\/$/, '');
+	async processCompanyData(url, affinityMetadata, allData) {
+		try {
+			const companyName = (
+				affinityMetadata[url] && affinityMetadata[url].length > 0 && affinityMetadata[url][0]['Name']
+					? affinityMetadata[url][0]['Name'][0]
+					: url
+			).replace(/\/$/, '');
 
-		let sfStringData = 'N/A';
-		let specterData = {};
-
-		// Process Salesforce data
-		if (allData?.salesforce?.websites && url in allData.salesforce.websites) {
-			const sfWebsites = allData.salesforce.websites[url] || [];
-			if (sfWebsites.length > 0) {
-				const sfUrl = sfWebsites[0].attributes?.url || '';
-				sfAccount = `https://bvp.lightning.force.com/lightning/r/Account${sfUrl.substring(
-					sfUrl.lastIndexOf('/')
-				)}/view`;
-				sfStringData = sfWebsites[0].Owner?.Name || 'N/A';
-			}
-		}
-
-		if (allData?.salesforce?.names && companyName in allData.salesforce.names) {
-			const sfNames = allData.salesforce.names[companyName] || [];
-			if (sfNames.length > 0) {
-				const sfUrl = sfNames[0].attributes?.url || '';
-				sfAccount = `https://bvp.lightning.force.com/lightning/r/Account${sfUrl.substring(
-					sfUrl.lastIndexOf('/')
-				)}/view`;
-				sfStringData = sfNames[0].Owner?.Name || 'N/A';
-			}
-		}
-
-		// Find specter data
-		const findSpecterData = (allData, companyName) =>
-			(allData.specter || []).filter((specter) => specter.Company_Name?.[0] === companyName);
-
-		specterData = await findSpecterData(allData, companyName);
-
-		// Criar objeto com valores padrão
-		let companyInfo = {
-			dateFunded: 'N/A',
-			companyLinkedin: 'N/A',
-			headcount: 'N/A',
-			description: 'N/A',
-			location: 'N/A',
-			founder: 'N/A',
-			totalFunding: 'N/A',
-			lastFunding: 'N/A',
-			fundingDate: 'N/A',
-			employeeGrowth: 'N/A',
-			affinityId: 'N/A',
-			lastMeeting: 'N/A',
-			lastEmail: 'N/A'
-		};
-
-		// Process Specter data if available
-		if (specterData.length > 0) {
-			Object.assign(companyInfo, {
-				dateFunded: specterData[0].Founded_Date?.[0] || 'N/A',
-				companyLinkedin: specterData[0]['LinkedIn_-_URL']?.[0] || 'N/A',
-				headcount: specterData[0].Employee_Count?.[0] || 'N/A',
-				description: specterData[0].Description?.[0] || 'N/A',
-				location: specterData[0].HQ_Region?.[0] || 'N/A',
-				founder: specterData[0].Founders?.[0] || 'N/A',
-				employeeGrowth: specterData[0]['Employees_-_6_Months_Growth']?.[0]?.toString() || '0',
-				totalFunding: specterData[0]['Total_Funding_Amount__in_USD_']?.[0] || 'N/A',
-				lastFunding: specterData[0]['Last_Funding_Amount__in_USD_']?.[0] || 'N/A',
-				fundingDate: specterData[0]['Last_Funding_Date']?.[0] || 'N/A'
-			});
-		}
-
-		// Process Affinity metadata
-		if (affinityMetadata[url]?.length > 0) {
-			const metadata = affinityMetadata[url][0];
-			companyInfo = await this.extractAffinityData(metadata, companyInfo);
-		}
-
-		// Se last email is not available, try to get it from Solr - usando cache
-		if (companyInfo.lastEmail === 'N/A' || companyInfo.lastEmail === '' || companyInfo.lastEmail === null) {
-			let specterFound;
-
-			// Check cache first
-			if (solrCache.has(url)) {
-				specterFound = solrCache.get(url);
-			} else {
-				specterFound = await querySolrByDomain(url);
-				// Store in cache
-				solrCache.set(url, specterFound);
-			}
-
-			// Processar todos os campos em um único ciclo
-			const fields = {
-				Last_Email: (value) => {
-					companyInfo.lastEmail = value;
-				},
-				Year_Founded: (value) => {
-					companyInfo.dateFunded = value;
-				},
-				Number_of_Employees: (value) => {
-					companyInfo.headcount = value;
-				},
-				Employees__Growth_YoY____: (value) => {
-					companyInfo.employeeGrowth = value;
-				},
-				LinkedIn_Profile__Founders_CEOs_: (value) => {
-					companyInfo.founder = value;
-				},
-				LinkedIn_URL: (value) => {
-					companyInfo.companyLinkedin = value;
-				},
-				Total_Funding_Amount__USD_: (value) => {
-					companyInfo.totalFunding = value;
-				},
-				Last_Funding_Date: (value) => {
-					companyInfo.fundingDate = value;
-				},
-				Last_Funding_Amount__USD_: (value) => {
-					companyInfo.lastFunding = value;
-				},
-				Location__Country_: (value) => {
-					companyInfo.location = value;
-				}
+			let companyInfo = {
+				dateFunded: 'N/A',
+				companyLinkedin: 'N/A',
+				headcount: 'N/A',
+				description: 'N/A',
+				location: 'N/A',
+				founder: 'N/A',
+				totalFunding: 'N/A',
+				lastFunding: 'N/A',
+				fundingDate: 'N/A',
+				employeeGrowth: 'N/A',
+				affinityId: 'N/A',
+				lastMeeting: 'N/A',
+				lastEmail: 'N/A',
+				sfAccount: 'N/A',
+				sfStringData: 'N/A'
 			};
 
-			this.extractMultipleFields(specterFound, fields);
-		}
+			let affinityData = [];
+			try {
+				console.log(`Searching Affinity for URL: ${url}`);
 
-		// Search in Affinity API - com cache
-		let affinity;
-		try {
-			// Check affinity cache first
-			if (affinityCache.has(url)) {
-				affinity = affinityCache.get(url);
-			} else {
-				affinity = await this.searchOrganizations(
+				affinityData = await this.searchOrganizations(
 					url,
 					true,
 					true,
 					'2001-01-01T00:00:00',
 					'2034-01-12T23:59:59'
 				);
-				// Store in cache
-				affinityCache.set(url, affinity);
+
+				console.log(`Affinity search completed for ${url}, found ${affinityData.length} results`);
+			} catch (error) {
+				console.error(`Error searching Affinity for ${url}:`, error);
 			}
 
-			if (affinity && affinity.length > 0) {
-				companyInfo.lastEmail = affinity[0].interaction_dates.last_email_date;
-				companyInfo.lastMeeting = affinity[0].interaction_dates.last_event_date;
-				companyInfo.affinityId = affinity[0].id;
+			// Process Salesforce data
+			if (allData?.salesforce?.websites && url in allData.salesforce.websites) {
+				const sfWebsites = allData.salesforce.websites[url] || [];
+				if (sfWebsites.length > 0) {
+					const sfUrl = sfWebsites[0].attributes?.url || '';
+					companyInfo.sfAccount = `https://bvp.lightning.force.com/lightning/r/Account${sfUrl.substring(
+						sfUrl.lastIndexOf('/')
+					)}/view`;
+					companyInfo.sfStringData = String(sfWebsites[0]?.Owner?.Name || 'N/A');
+				}
 			}
+
+			if (allData?.salesforce?.names && companyName in allData.salesforce.names) {
+				const sfNames = allData.salesforce.names[companyName] || [];
+				if (sfNames.length > 0) {
+					const sfUrl = sfNames[0].attributes?.url || '';
+					companyInfo.sfAccount = `https://bvp.lightning.force.com/lightning/r/Account${sfUrl.substring(
+						sfUrl.lastIndexOf('/')
+					)}/view`;
+					companyInfo.sfStringData = String(sfNames[0]?.Owner?.Name || 'N/A');
+				}
+			}
+
+			// Find specter data
+			const findSpecterData = (allData, companyName) =>
+				(allData.specter || []).filter((specter) => {
+					const specterCompanyNames = specter.Company_Name || [''];
+					const specterDomains = specter.Domain || [''];
+
+					return specterCompanyNames[0] === companyName || specterDomains[0] === url;
+				});
+
+			const specterData = findSpecterData(allData, companyName);
+
+			if (specterData.length > 0) {
+				Object.assign(companyInfo, {
+					dateFunded: specterData[0].Founded_Date?.[0] || 'N/A',
+					companyLinkedin: specterData[0]['LinkedIn_-_URL']?.[0] || 'N/A',
+					headcount: specterData[0].Employee_Count?.[0] || 'N/A',
+					description: specterData[0].Description?.[0] || 'N/A',
+					location: specterData[0].HQ_Region?.[0] || 'N/A',
+					founder: specterData[0].Founders?.[0] || 'N/A',
+					employeeGrowth: specterData[0]['Employees_-_6_Months_Growth']?.[0]?.toString() || '0',
+					totalFunding: specterData[0]['Total_Funding_Amount__in_USD_']?.[0] || 'N/A',
+					lastFunding: specterData[0]['Last_Funding_Amount__in_USD_']?.[0] || 'N/A',
+					fundingDate: specterData[0]['Last_Funding_Date']?.[0] || 'N/A'
+				});
+			}
+
+			if ((affinityMetadata[url] || []).length > 0) {
+				const metadata = affinityMetadata[url][0];
+				companyInfo = this.extractAffinityData(metadata, companyInfo);
+			}
+
+			if (companyInfo.lastEmail === 'N/A' || companyInfo.lastEmail === '' || companyInfo.lastEmail === null) {
+				let specterFound = await querySolrByDomain(url);
+
+				const fields = {
+					Last_Email: (value) => {
+						companyInfo.lastEmail = value;
+					},
+					Year_Founded: (value) => {
+						companyInfo.dateFunded = value;
+					},
+					Number_of_Employees: (value) => {
+						companyInfo.headcount = value;
+					},
+					Employees__Growth_YoY____: (value) => {
+						companyInfo.employeeGrowth = value;
+					},
+					LinkedIn_Profile__Founders_CEOs_: (value) => {
+						companyInfo.founder = value;
+					},
+					LinkedIn_URL: (value) => {
+						companyInfo.companyLinkedin = value;
+					},
+					Total_Funding_Amount__USD_: (value) => {
+						companyInfo.totalFunding = value;
+					},
+					Last_Funding_Date: (value) => {
+						companyInfo.fundingDate = value;
+					},
+					Last_Funding_Amount__USD_: (value) => {
+						companyInfo.lastFunding = value;
+					},
+					Location__Country_: (value) => {
+						companyInfo.location = value;
+					}
+				};
+
+				this.extractMultipleFields(specterFound, fields);
+			}
+
+			if (affinityData && affinityData.length > 0) {
+				console.log('Using Affinity data for', url, {
+					lastEmail: affinityData[0].interaction_dates?.last_email_date,
+					lastMeeting: affinityData[0].interaction_dates?.last_event_date,
+					companyId: affinityData[0].id
+				});
+
+				if (affinityData[0].interaction_dates?.last_email_date) {
+					companyInfo.lastEmail = affinityData[0].interaction_dates.last_email_date;
+				}
+
+				if (affinityData[0].interaction_dates?.last_event_date) {
+					companyInfo.lastMeeting = affinityData[0].interaction_dates.last_event_date;
+				}
+
+				companyInfo.affinityId = affinityData[0].id;
+			}
+
+			if (url.includes('minion')) {
+				console.log('companyInfo', companyInfo);
+			}
+
+			if (companyInfo.sfAccount === 'N/A') {
+				try {
+					const { sfId, source } = await salesforceApi.salesforceIdFinal(companyName, url);
+
+					if (sfId) {
+						const ownerNameData = await salesforceApi.salesforceOwnername(sfId);
+
+						if (ownerNameData) {
+							companyInfo.sfAccount = ownerNameData.salesforce_url || 'N/A';
+
+							companyInfo.sfStringData = ownerNameData.ownerName || 'N/A';
+
+							if (
+								companyInfo.lastEmail === 'N/A' ||
+								companyInfo.lastEmail === '' ||
+								companyInfo.lastEmail === null
+							) {
+								companyInfo.lastEmail = ownerNameData.last_email_date || 'N/A';
+							}
+
+							if (
+								(companyInfo.lastMeeting === 'N/A' ||
+									companyInfo.lastMeeting === '' ||
+									companyInfo.lastMeeting === null) &&
+								ownerNameData.last_activity
+							) {
+								companyInfo.lastMeeting = ownerNameData.last_activity;
+							}
+						}
+					}
+				} catch (error) {
+					console.error(`Error fetching additional Salesforce data for ${companyName}: ${error.message}`);
+				}
+			}
+
+			const finalValues = {
+				lastEmail: companyInfo.lastEmail || 'N/A',
+				lastMeeting: companyInfo.lastMeeting || 'N/A',
+				sfAccount: companyInfo.sfAccount || 'N/A',
+				sfStringData: companyInfo.sfStringData || 'N/A'
+			};
+
+			console.log(`FINAL VALUES FOR CSV ${url}:`, finalValues);
+
+			return {
+				ID: `${this.generateRandomId()}-${this.generateRandomId()}`,
+				date_added: '',
+				'Company Name': companyName,
+				'Company Website': url.replace(/\/$/, ''),
+				'Last Email Date': finalValues.lastEmail,
+				'Last Meeting Date': finalValues.lastMeeting,
+				'Link to Salesforce Entry': finalValues.sfAccount,
+				'Salesforce Return String': finalValues.sfStringData,
+				'Link to Affinity Entry':
+					companyInfo.affinityId !== 'N/A'
+						? `https://bvp.affinity.co/companies/${companyInfo.affinityId}`
+						: companyInfo.affinityId,
+				'Year Founded': companyInfo.dateFunded || 'N/A',
+				'Company Linkedin': companyInfo.companyLinkedin || 'N/A',
+				'Number of Employees': companyInfo.headcount || 'N/A',
+				Description: companyInfo.description || 'N/A',
+				Country: companyInfo.location || 'N/A',
+				"Founders, CEO's Linkedin": companyInfo.founder || 'N/A',
+				'Total Funding': companyInfo.totalFunding || 'N/A',
+				'Last Funding': companyInfo.lastFunding || 'N/A',
+				'Last Funding Date': companyInfo.fundingDate || 'N/A',
+				'Employee Growth Rate': companyInfo.employeeGrowth || 'N/A'
+			};
 		} catch (error) {
-			console.error(`Error searching Affinity for ${url}:`, error);
+			console.error(`Error processing company data for ${url}:`, error);
+			throw error;
 		}
-
-		return {
-			ID: `${this.generateRandomId()}-${this.generateRandomId()}`,
-			date_added: '',
-			'Company Name': companyName,
-			'Company Website': url.replace(/\/$/, ''),
-			'Last Email Date': companyInfo.lastEmail,
-			'Last Meeting Date': companyInfo.lastMeeting,
-			'Link to Salesforce Entry': sfAccount,
-			'Salesforce Return String': sfStringData,
-			'Link to Affinity Entry':
-				companyInfo.affinityId !== 'N/A'
-					? `https://bvp.affinity.co/companies/${companyInfo.affinityId}`
-					: companyInfo.affinityId,
-			'Year Founded': companyInfo.dateFunded,
-			'Company Linkedin': companyInfo.companyLinkedin,
-			'Number of Employees': companyInfo.headcount,
-			Description: companyInfo.description,
-			Country: companyInfo.location,
-			"Founders, CEO's Linkedin": companyInfo.founder,
-			'Total Funding': companyInfo.totalFunding,
-			'Last Funding': companyInfo.lastFunding,
-			'Last Funding Date': companyInfo.fundingDate,
-			'Employee Growth Rate': companyInfo.employeeGrowth
-		};
 	}
 
 	cleanAndParseUrl(url) {
-		let parsedUrl = url.replace(/https?:\/\//, '').replace('www.', '');
+		let parsedUrl = url.replace(/\/$/, '');
+
+		parsedUrl = parsedUrl.replace(/https?:\/\//, '').replace('www.', '');
 		parsedUrl = parsedUrl.replace(/[\[\]'"]/g, '');
 
 		try {
@@ -464,10 +523,10 @@ class CsvEnrichService {
 			if (parsedDomain.startsWith('ftp.')) {
 				parsedDomain = `${urlObj.protocol}//${parsedDomain}`;
 			}
-			return parsedDomain;
+			return parsedDomain.toLowerCase();
 		} catch (e) {
 			console.error(`Invalid URL: ${parsedUrl}`, e);
-			return parsedUrl;
+			return parsedUrl.toLowerCase();
 		}
 	}
 
@@ -484,25 +543,34 @@ class CsvEnrichService {
 		}
 	}
 
-	/**
-	 * Extract all Affinity data in one pass
-	 */
 	extractAffinityData(metadata, dataObj) {
 		try {
 			if (dataObj.totalFunding === 'N/A' && 'Total_Funding_Amount__USD_' in metadata) {
 				dataObj.totalFunding = metadata['Total_Funding_Amount__USD_'][0];
 			}
 
-			if (dataObj.lastMeeting === 'N/A' && 'Last_Meeting' in metadata) {
+			if (
+				dataObj.lastMeeting === 'N/A' &&
+				metadata &&
+				'Last_Meeting' in metadata &&
+				metadata['Last_Meeting'] &&
+				metadata['Last_Meeting'].length > 0
+			) {
 				dataObj.lastMeeting = metadata['Last_Meeting'][0];
+			}
+
+			if (
+				dataObj.lastEmail === 'N/A' &&
+				metadata &&
+				'Last_Email' in metadata &&
+				metadata['Last_Email'] &&
+				metadata['Last_Email'].length > 0
+			) {
+				dataObj.lastEmail = metadata['Last_Email'][0];
 			}
 
 			if (dataObj.lastFunding === 'N/A' && 'Last_Funding_Amount__USD_' in metadata) {
 				dataObj.lastFunding = metadata['Last_Funding_Amount__USD_'][0];
-			}
-
-			if (dataObj.lastEmail === 'N/A' && 'Last_Email' in metadata) {
-				dataObj.lastEmail = metadata['Last_Email'][0];
 			}
 
 			if (dataObj.fundingDate === 'N/A' && 'Last_Funding_Date' in metadata) {
