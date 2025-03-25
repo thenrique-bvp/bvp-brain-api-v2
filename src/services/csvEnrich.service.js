@@ -11,7 +11,6 @@ const { querySolrByDomain } = require('./solr.service');
 const endpoint = 'https://brain.bessemer.io/api/v1/website';
 const headers = { 'Content-Type': 'application/json' };
 const AFFINITY_API_KEY = process.env.AFFINITY_API_KEY;
-console.log('AFFINITY_API_KEY', AFFINITY_API_KEY);
 class CsvEnrichService {
 	async searchOrganizations(
 		term = null,
