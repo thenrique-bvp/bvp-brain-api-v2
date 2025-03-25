@@ -32,7 +32,6 @@ class CsvEnrichService {
 			max_last_email_date: maxLastEmailDate
 		};
 
-		// Remove null parameters
 		Object.keys(params).forEach((key) => params[key] === null && delete params[key]);
 
 		const results = [];
@@ -62,9 +61,6 @@ class CsvEnrichService {
 		}
 	}
 
-	/**
-	 * Extract field from Solr response
-	 */
 	extractField(responseJson, field) {
 		const docs = responseJson?.response?.docs || [];
 
@@ -76,7 +72,6 @@ class CsvEnrichService {
 			}
 		}
 
-		// Return default value if not found
 		return 'N/A';
 	}
 
@@ -107,7 +102,7 @@ class CsvEnrichService {
 			async () => {
 				const response = await axios.post(url, companiesData, {
 					headers,
-					timeout: 8000 // Add timeout to prevent hanging requests
+					timeout: 8000
 				});
 				return response.data;
 			},
@@ -116,9 +111,6 @@ class CsvEnrichService {
 		);
 	}
 
-	/**
-	 * Get data for URL
-	 */
 	getDataForUrl(url, dataList) {
 		for (const item of dataList) {
 			if (item.url === url) {
@@ -142,7 +134,7 @@ class CsvEnrichService {
 			const records = [];
 
 			await new Promise((resolve, reject) => {
-				const stream = Readable.from(csvData, { highWaterMark: 64 * 1024 }); // 64KB chunks
+				const stream = Readable.from(csvData, { highWaterMark: 64 * 1024 });
 				stream
 					.pipe(
 						csv({
@@ -163,10 +155,9 @@ class CsvEnrichService {
 
 			console.timeLog('csv-processing', 'URL parsing completed');
 
-			const batchSize = 80; //Podemos aumentar para quanto quisermos
+			const batchSize = 80;
 			const listOfReturns = [];
 
-			// Dividindo em batches para não sobrecarregar a API
 			const batches = [];
 			for (let i = 0; i < parsedUrls.length; i += batchSize) {
 				batches.push(parsedUrls.slice(i, i + batchSize));
@@ -178,7 +169,6 @@ class CsvEnrichService {
 			for (let i = 0; i < batches.length; i += concurrencyLimit) {
 				const currentBatches = batches.slice(i, i + concurrencyLimit);
 
-				// Processar em paralelo
 				await Promise.all(
 					currentBatches.map(async (batchUrls) => {
 						activeBatches++;
@@ -200,7 +190,6 @@ class CsvEnrichService {
 						const affinityMetadata = response.data;
 						const payloadForCore = { companies: [] };
 
-						// Preparar dados para API core após processar batchUrls
 						const processedUrls = await Promise.all(
 							batchUrls.map(async (url) => {
 								return {
@@ -212,11 +201,9 @@ class CsvEnrichService {
 
 						payloadForCore.companies = processedUrls;
 
-						// Primeiro obtemos os dados do batch endpoint
 						const allData = await this.callBatchEndpoint(payloadForCore);
 
-						// Só depois processamos os URLs com os dados obtidos
-						const chunkSize = 20; // Processar 20 por vez
+						const chunkSize = 20;
 						for (let j = 0; j < batchUrls.length; j += chunkSize) {
 							const chunk = batchUrls.slice(j, j + chunkSize);
 
@@ -322,7 +309,6 @@ class CsvEnrichService {
 				console.error(`Error searching Affinity for ${url}:`, error);
 			}
 
-			// Process Salesforce data
 			if (allData?.salesforce?.websites && url in allData.salesforce.websites) {
 				const sfWebsites = allData.salesforce.websites[url] || [];
 				if (sfWebsites.length > 0) {
@@ -345,7 +331,6 @@ class CsvEnrichService {
 				}
 			}
 
-			// Find specter data
 			const findSpecterData = (allData, companyName) =>
 				(allData.specter || []).filter((specter) => {
 					const specterCompanyNames = specter.Company_Name || [''];
