@@ -619,14 +619,23 @@ class CsvEnrichService {
 	}
 
 	formatDate(dateString) {
-		if (!dateString || dateString === 'N/A' || dateString.trim() === '') {
+		if (
+			!dateString ||
+			dateString === 'N/A' ||
+			dateString.trim() === '' ||
+			dateString === 'No email date found' ||
+			typeof dateString !== 'string'
+		) {
 			return 'N/A';
 		}
 
 		try {
+			if (!dateString.match(/^\d{4}-\d{2}-\d{2}/)) {
+				return 'N/A';
+			}
+
 			if (dateString.includes('T')) {
 				const [datePart, timePart] = dateString.split('T');
-
 				const [year, month, day] = datePart.split('-');
 
 				const timeValue = timePart.split('.')[0];
