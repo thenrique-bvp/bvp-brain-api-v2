@@ -624,22 +624,18 @@ class CsvEnrichService {
 		}
 
 		try {
-			const date = new Date(dateString);
-
-			if (isNaN(date.getTime())) {
-				return 'N/A';
-			}
-
-			const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
-			const day = date.getUTCDate().toString().padStart(2, '0');
-			const year = date.getUTCFullYear();
-
 			if (dateString.includes('T')) {
-				const hours = date.getUTCHours().toString().padStart(2, '0');
-				const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+				const [datePart, timePart] = dateString.split('T');
+
+				const [year, month, day] = datePart.split('-');
+
+				const timeValue = timePart.split('.')[0];
+				const [hours, minutes] = timeValue.split(':');
+
 				return `${month}/${day}/${year} ${hours}:${minutes}`;
 			}
 
+			const [year, month, day] = dateString.split('-');
 			return `${month}/${day}/${year}`;
 		} catch (error) {
 			console.error('Error formatting date:', error);
