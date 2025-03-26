@@ -458,8 +458,8 @@ class CsvEnrichService {
 			}
 
 			const finalValues = {
-				lastEmail: companyInfo.lastEmail || 'N/A',
-				lastMeeting: companyInfo.lastMeeting || 'N/A',
+				lastEmail: this.formatDate(companyInfo.lastEmail || 'N/A'),
+				lastMeeting: this.formatDate(companyInfo.lastMeeting || 'N/A'),
 				sfAccount: companyInfo.sfAccount || 'N/A',
 				sfStringData: companyInfo.sfStringData || 'N/A'
 			};
@@ -487,7 +487,7 @@ class CsvEnrichService {
 				"Founders, CEO's Linkedin": companyInfo.founder || 'N/A',
 				'Total Funding': companyInfo.totalFunding || 'N/A',
 				'Last Funding': companyInfo.lastFunding || 'N/A',
-				'Last Funding Date': companyInfo.fundingDate || 'N/A',
+				'Last Funding Date': this.formatDate(companyInfo.fundingDate) || 'N/A',
 				'Employee Growth Rate': companyInfo.employeeGrowth || 'N/A'
 			};
 		} catch (error) {
@@ -615,6 +615,35 @@ class CsvEnrichService {
 		} catch (error) {
 			console.error('Error in enrichCsv:', error);
 			throw error;
+		}
+	}
+
+	formatDate(dateString) {
+		if (!dateString || dateString === 'N/A' || dateString.trim() === '') {
+			return 'N/A';
+		}
+
+		try {
+			const date = new Date(dateString);
+
+			if (isNaN(date.getTime())) {
+				return 'N/A';
+			}
+
+			const month = (date.getMonth() + 1).toString().padStart(2, '0');
+			const day = date.getDate().toString().padStart(2, '0');
+			const year = date.getFullYear();
+
+			if (dateString.includes('T')) {
+				const hours = date.getHours().toString().padStart(2, '0');
+				const minutes = date.getMinutes().toString().padStart(2, '0');
+				return `${month}/${day}/${year} ${hours}:${minutes}`;
+			}
+
+			return `${month}/${day}/${year}`;
+		} catch (error) {
+			console.error('Error formatting date:', error);
+			return 'N/A';
 		}
 	}
 }
