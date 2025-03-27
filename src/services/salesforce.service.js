@@ -9,8 +9,26 @@ class SalesforceService {
 
 	async initialize() {
 		if (!this.initialized) {
-			await this.conn.login('jscheller@bvp.com', 'Ploopers@123fJx7TNf0tRiFLlRCgAT968Vzz');
-			this.initialized = true;
+			const username = process.env.SALESFORCE_USERNAME;
+			const password = process.env.SALESFORCE_PASSWORD;
+
+			if (!username || !password) {
+				throw new Error('Salesforce credentials not found in environment variables');
+			}
+
+			try {
+				await this.conn.login(username, password);
+				this.initialized = true;
+			} catch (error) {
+				const errorLogService = require('./errorLog.service');
+				await errorLogService.sendMessage({
+					service: 'SalesforceService',
+					method: 'initialize',
+					error: error.message,
+					details: { stack: error.stack }
+				});
+				throw new Error('Failed to authenticate with Salesforce');
+			}
 		}
 	}
 
