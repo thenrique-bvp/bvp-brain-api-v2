@@ -131,6 +131,10 @@ class SalesforceService {
 	}
 
 	escapeSoqlString(s) {
+		if (!s) {
+			return '';
+		}
+
 		return s.replace(/'/g, '');
 	}
 

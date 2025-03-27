@@ -23,6 +23,15 @@ app.use('/health', (req, res) => {
 	});
 });
 
+console.log('API Routes being mounted:');
+routes.stack.forEach((route) => {
+	if (route.route) {
+		const path = route.route.path;
+		const methods = Object.keys(route.route.methods).join(', ').toUpperCase();
+		console.log(`${methods} /api/v2${path}`);
+	}
+});
+
 app.use('/api/v2', routes);
 
 app.use((err, req, res, next) => {
