@@ -19,14 +19,12 @@ class ErrorLogService {
 				null,
 				2
 			)}`;
-			console.log('message', message);
 
 			const response = await axios.post(
 				'https://xt44qcnfdye4gdh3qb5wv4epsm0fmajc.lambda-url.us-east-2.on.aws/',
 				{ message },
 				{ headers: { 'Content-Type': 'application/json' } }
 			);
-			console.log('DATA', response.data);
 
 			return response.data;
 		} catch (err) {

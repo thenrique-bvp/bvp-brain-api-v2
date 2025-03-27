@@ -1,5 +1,5 @@
 const { URL } = require('url');
-const jsforce = require('jsforce'); // Equivalente ao simple_salesforce em Python
+const jsforce = require('jsforce');
 
 class SalesforceService {
 	constructor() {
@@ -70,20 +70,16 @@ class SalesforceService {
 				return user.Id;
 			}
 		}
-		return null; // Return null if the user is not found
+		return null;
 	}
 
-	// Método que corresponde ao SalesforceBatchAPI.company_website_exists
 	async companyWebsiteExists(websites) {
 		await this.initialize();
 
 		try {
-			// Prepare the list to store sanitized domains
 			const sanitizedDomains = [];
 
-			// Iterate over the list of websites to sanitize and prepare the domains
 			for (const website of websites) {
-				// Extract the domain from the website URL
 				let domain;
 				try {
 					domain = new URL(website.startsWith('http') ? website : `http://${website}`).hostname;
@@ -91,33 +87,27 @@ class SalesforceService {
 					domain = website;
 				}
 
-				// Sanitize the domain and remove 'www.'
 				let sanitizedDomain = domain.replace(/'/g, "''").replace('www.', '');
 				sanitizedDomain = sanitizedDomain.replace('http://', '').replace('https://', '');
 				sanitizedDomain = sanitizedDomain.replace(':443', '');
 				sanitizedDomains.push(sanitizedDomain);
 			}
 
-			// Prepare the SOQL query with OR conditions for all sanitized domains
 			const queryConditions = sanitizedDomains.map((domain) => `Website LIKE '%${domain}%'`).join(' OR ');
 			const soqlQuery = `SELECT Id, Name, Owner.Name, BVP_Owners__c, Last_Activity_Date__c, Last_Email_Received_Date__c FROM Account WHERE ${queryConditions} LIMIT 200`;
 
-			// Execute the query
 			const records = await this.conn.query(soqlQuery);
 
-			// Prepare a dictionary to store results with domain as key
 			const results = {};
 			sanitizedDomains.forEach((domain) => {
 				results[domain] = [];
 			});
 
-			// Iterate over the records and organize them by domain
 			for (const record of records.records) {
 				const website = record.Website || '';
 
 				if (record.BVP_Owners__c) {
 					if (!record.Owner) {
-						// Initialize 'Owner' if not present
 						record.Owner = {};
 					}
 					record.Owner.Name = record.BVP_Owners__c;
@@ -126,7 +116,6 @@ class SalesforceService {
 				for (const domain of sanitizedDomains) {
 					if (website.includes(domain)) {
 						if (!results[domain]) {
-							// Initialize domain list if not present
 							results[domain] = [];
 						}
 						results[domain].push(record);
@@ -134,7 +123,7 @@ class SalesforceService {
 				}
 			}
 
-			return results; // Return the dictionary with domains as keys
+			return results;
 		} catch (error) {
 			console.error(`An error occurred: ${error}`);
 			return null;
@@ -150,23 +139,19 @@ class SalesforceService {
 
 		try {
 			if (names.length > 0) {
-				// Sanitize the names and prepare the SOQL query
 				const sanitizedNames = names.map((name) => name.replace(/'/g, "''"));
 				const queryConditions = sanitizedNames
 					.map((name) => `Name = '${this.escapeSoqlString(name)}'`)
 					.join(' OR ');
 				const soqlQuery = `SELECT Id, Name, Owner.Name, BVP_Owners__c, Last_Activity_Date__c, Last_Email_Received_Date__c FROM Account WHERE ${queryConditions} LIMIT 200`;
 
-				// Execute the query
 				const records = await this.conn.query(soqlQuery);
 
-				// Prepare a dictionary to store results with names as keys
 				const results = {};
 				sanitizedNames.forEach((name) => {
 					results[name] = [];
 				});
 
-				// Iterate over the records and organize them by name
 				for (const record of records.records) {
 					const name = record.Name;
 					if (record.BVP_Owners__c) {
@@ -177,7 +162,7 @@ class SalesforceService {
 					}
 				}
 
-				return results; // Return the dictionary with names as keys
+				return results;
 			} else {
 				return {};
 			}
@@ -191,12 +176,10 @@ class SalesforceService {
 		await this.initialize();
 
 		try {
-			// Attempt to add 'http://' prefix if missing to properly parse the URL
 			if (!website.startsWith('http://') && !website.startsWith('https://')) {
 				website = 'http://' + website;
 			}
 
-			// Extract the domain from the website URL
 			let domain;
 			try {
 				domain = new URL(website).hostname;
@@ -204,12 +187,10 @@ class SalesforceService {
 				domain = website;
 			}
 
-			// Prepare and sanitize the domain for the query
-			const sanitizedDomain = domain.replace(/'/g, "''"); // Escape single quotes
+			const sanitizedDomain = domain.replace(/'/g, "''");
 			const domainNoWww = sanitizedDomain.replace('www.', '');
 			console.log(`the sanitized domain is: ${domainNoWww}`);
 
-			// List of queries to execute sequentially
 			const queries = [
 				`SELECT Id, Name FROM Account WHERE Website = 'https://${domainNoWww}' LIMIT 1`,
 				`SELECT Id, Name FROM Account WHERE Website = 'http://${domainNoWww}' LIMIT 1`,
@@ -217,15 +198,13 @@ class SalesforceService {
 				`SELECT Id, Name FROM Account WHERE Website LIKE '%${domainNoWww}%' LIMIT 1`
 			];
 
-			// Execute each query sequentially and return the account ID if a match is found
 			for (const query of queries) {
 				const records = await this.conn.query(query);
 				if (records.totalSize > 0) {
-					return { sfId: records.records[0].Id, source: 'website' }; // Return the account ID and source
+					return { sfId: records.records[0].Id, source: 'website' };
 				}
 			}
 
-			// Check for name match if website match failed
 			const nameQuery = `SELECT Id, Name FROM Account WHERE Name = '${this.escapeSoqlString(name)}' LIMIT 1`;
 			const nameRecords = await this.conn.query(nameQuery);
 
@@ -233,7 +212,7 @@ class SalesforceService {
 				return { sfId: nameRecords.records[0].Id, source: 'name' };
 			}
 
-			return { sfId: null, source: null }; // Return null values if not found
+			return { sfId: null, source: null };
 		} catch (error) {
 			console.error(`An error occurred: ${error}`);
 			return { sfId: null, source: null };
@@ -243,7 +222,7 @@ class SalesforceService {
 	async salesforceOwnername(salesforceId) {
 		await this.initialize();
 
-		const objectApiName = 'Account'; // Ensure this is the correct API name for your object
+		const objectApiName = 'Account';
 
 		if (salesforceId) {
 			try {
@@ -280,11 +259,10 @@ class SalesforceService {
 	async salesforceOwnernames(salesforceIds) {
 		await this.initialize();
 
-		const objectApiName = 'Account'; // Ensure this is the correct API name for your object
+		const objectApiName = 'Account';
 
 		if (salesforceIds && salesforceIds.length > 0) {
 			try {
-				// Construct the query with the IN clause
 				const idsString = salesforceIds.map((id) => `'${id}'`).join(', ');
 				const query = `SELECT Id, Owner.Name FROM ${objectApiName} WHERE Id IN (${idsString})`;
 				const result = await this.conn.query(query);
@@ -302,7 +280,6 @@ class SalesforceService {
 					});
 				}
 
-				// Check for any IDs not found in the result
 				const foundIds = new Set(result.records.map((record) => record.Id));
 				const notFoundIds = salesforceIds.filter((id) => !foundIds.has(id));
 
